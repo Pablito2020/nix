@@ -328,6 +328,8 @@ struct CmdFlakeCheck : FlakeCommand
 {
     bool build = true;
     bool checkAllSystems = false;
+    std::set<std::string> ignoredNixosSystems;
+
 
     CmdFlakeCheck()
     {
@@ -341,6 +343,16 @@ struct CmdFlakeCheck : FlakeCommand
             .description = "Check the outputs for all systems.",
             .handler = {&checkAllSystems, true}
         });
+        addFlag({
+            .longName="no-check-nixos-system",
+            .description = "NixOS systems that will not be checked",
+            .handler={[&](std::vector<std::string> ignoredNixosConfigs){
+                for (auto nixosConfig : ignoredNixosConfigs) {
+                    ignoredNixosSystems.insert(nixosConfig);
+                }
+            }}
+        });
+
     }
 
     std::string description() override
@@ -614,7 +626,6 @@ struct CmdFlakeCheck : FlakeCommand
                 [&](std::string_view name, Value & vOutput, const PosIdx pos) {
                     Activity act(*logger, lvlInfo, actUnknown,
                         fmt("checking flake output '%s'", name));
-
                     try {
                         evalSettings.enableImportFromDerivation.setDefault(name != "hydraJobs");
 
@@ -754,9 +765,15 @@ struct CmdFlakeCheck : FlakeCommand
 
                         else if (name == "nixosConfigurations") {
                             state->forceAttrs(vOutput, pos, "");
-                            for (auto & attr : *vOutput.attrs())
-                                checkNixOSConfiguration(fmt("%s.%s", name, state->symbols[attr.name]),
+                            for (auto & attr : *vOutput.attrs()) {
+                                auto nixosConfiguration = state->symbols[attr.name];
+                                if (ignoredNixosSystems.contains(nixosConfiguration.c_str())) {
+                                    logger->warn(fmt("Ignored nixosConfiguration: %s ", nixosConfiguration));
+                                    continue;
+                                }
+                                checkNixOSConfiguration(fmt("%s.%s", name, nixosConfiguration),
                                     *attr.value, attr.pos);
+                            }
                         }
 
                         else if (name == "hydraJobs")
